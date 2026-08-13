@@ -100,6 +100,39 @@ def init_db():
         )
     """)
 
+    # 21-day challenge tracking
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS challenges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            challenge_type TEXT DEFAULT '21day',
+            start_date DATE,
+            current_day INTEGER DEFAULT 1,
+            is_active INTEGER DEFAULT 1,
+            completed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
+    # 369 intentions
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS method_369 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            intention TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
+    # Ensure language column exists
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'hi'")
+    except:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -400,3 +433,93 @@ def can_add_goal(user_id: int) -> tuple[bool, str]:
     if count >= FREE_GOAL_LIMIT:
         return False, f"Free plan mein max {FREE_GOAL_LIMIT} goals allowed hain.\n\nPremium → Unlimited goals\n/premium"
     return True, ""
+
+
+# ---------- Language ----------
+
+def get_language(user_id: int) -> str:
+    u = get_user(user_id)
+    if u and u["language"]:
+        return u["language"] if u["language"] in ("hi", "en") else "hi"
+    return "hi"
+
+
+def set_language(user_id: int, lang: str):
+    lang = "en" if lang == "en" else "hi"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
+    conn.commit()
+    conn.close()
+
+
+# ---------- 21-Day Challenge ----------
+
+def start_challenge(user_id: int, challenge_type: str = "21day") -> bool:
+    # Deactivate old ones
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE challenges SET is_active = 0 WHERE user_id = ? AND is_active = 1", (user_id,))
+    cur.execute(
+        "INSERT INTO challenges (user_id, challenge_type, start_date, current_day, is_active) VALUES (?, ?, ?, 1, 1)",
+        (user_id, challenge_type, date.today().isoformat())
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_active_challenge(user_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM challenges WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def advance_challenge_day(user_id: int) -> int:
+    ch = get_active_challenge(user_id)
+    if not ch:
+        return 0
+    new_day = (ch["current_day"] or 1) + 1
+    completed = 1 if new_day > 21 else 0
+    active = 0 if completed else 1
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE challenges SET current_day = ?, completed = ?, is_active = ? WHERE id = ?",
+        (min(new_day, 22), completed, active, ch["id"])
+    )
+    conn.commit()
+    conn.close()
+    return min(new_day, 21)
+
+
+# ---------- 369 Method ----------
+
+def set_369_intention(user_id: int, intention: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE method_369 SET is_active = 0 WHERE user_id = ? AND is_active = 1", (user_id,))
+    cur.execute(
+        "INSERT INTO method_369 (user_id, intention, is_active) VALUES (?, ?, 1)",
+        (user_id, intention.strip())
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_369_intention(user_id: int) -> Optional[str]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT intention FROM method_369 WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row["intention"] if row else None

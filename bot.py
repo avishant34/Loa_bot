@@ -58,8 +58,9 @@ def main_keyboard():
         [KeyboardButton("✨ Affirmation"), KeyboardButton("🎯 My Goals")],
         [KeyboardButton("🙏 Gratitude"), KeyboardButton("🧘 Visualize")],
         [KeyboardButton("💬 Chat with Coach"), KeyboardButton("🔥 Streak")],
-        [KeyboardButton("💎 Premium"), KeyboardButton("⚙️ Settings")],
-        [KeyboardButton("ℹ️ Help")],
+        [KeyboardButton("🔢 369 Method"), KeyboardButton("📅 21-Day Challenge")],
+        [KeyboardButton("💎 Premium"), KeyboardButton("🌐 Language")],
+        [KeyboardButton("⚙️ Settings"), KeyboardButton("ℹ️ Help")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -198,18 +199,20 @@ async def affirmation_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     goals = get_user_goals_texts(user.id)
+    lang = db.get_language(user.id)
     affirmation = None
 
     # Try AI first
     if ai.is_ai_available():
         affirmation = ai.generate_ai_affirmation(
             goals=goals,
-            user_name=user.first_name
+            user_name=user.first_name,
+            lang=lang
         )
 
     # Fallback to local
     if not affirmation:
-        affirmation = local_generate_affirmation(goals)
+        affirmation = local_generate_affirmation(goals, lang=lang)
 
     db.log_affirmation(user.id, affirmation)
 
@@ -226,18 +229,37 @@ Feel karo ki yeh already true hai.
 
 
 async def visualize_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = get_visualization_prompt()
-    text = f"""
-🧘 *Guided Visualization*
+    user = update.effective_user
+    db.ensure_user(user.id, user.username, user.first_name)
+    lang = db.get_language(user.id)
+    goals = get_user_goals_texts(user.id)
+
+    prompt = None
+    if ai.is_ai_available():
+        prompt = ai.generate_visualization(goals=goals, lang=lang)
+    if not prompt:
+        prompt = get_visualization_prompt(lang=lang)
+
+    if lang == "en":
+        text = f"""🧘 *Guided Visualization*
+
+{prompt}
+
+*How to do it:*
+1. Sit in a quiet place
+2. Close your eyes
+3. Feel it as real for 1-3 minutes
+4. Open your eyes and carry the feeling"""
+    else:
+        text = f"""🧘 *Guided Visualization*
 
 {prompt}
 
 *Kaise karein:*
 1. Shant jagah baitho
 2. Aankhein band karo
-3. 1-3 minute ke liye deeply feel karo
-4. Jab ready ho, aankhein kholo aur smile karo
-"""
+3. 1-3 minute deeply feel karo (wish fulfilled)
+4. Aankhein kholo aur us feeling ko din bhar rakho"""
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
@@ -348,6 +370,7 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
     history = chat_histories.get(user_id, [])
 
+    lang = db.get_language(user_id)
     reply = ai.chat_with_coach(
         user_message=text,
         goals=goals,
@@ -355,6 +378,7 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
         streak=streak,
         chat_history=history,
         user_name=user.first_name,
+        lang=lang,
     )
 
     # Count usage (only for free users effectively)
@@ -444,12 +468,13 @@ async def gratitude_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.ensure_user(user.id, user.username, user.first_name)
     context.user_data["chat_mode"] = False
 
-    prompt = get_gratitude_prompt()
-    await update.message.reply_text(
-        f"🙏 *Gratitude Time*\n\n{prompt}\n\n"
-        "Apni 1-3 cheezein likho (ek message mein):",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    lang = db.get_language(user.id)
+    prompt = get_gratitude_prompt(lang=lang)
+    if lang == "en":
+        txt = f"🙏 *Gratitude Time*\n\n{prompt}\n\nWrite 1-3 things (in one message):"
+    else:
+        txt = f"🙏 *Gratitude Time*\n\n{prompt}\n\nApni 1-3 cheezein likho (ek message mein):"
+    await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN)
     return WAITING_GRATITUDE
 
 
@@ -601,6 +626,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if "premium" in lower or "subscribe" in lower:
         await premium_cmd(update, context)
+        return
+    if "369" in lower or "method" in lower:
+        await method369_cmd(update, context)
+        return
+    if "challenge" in lower or "21" in lower:
+        await challenge_cmd(update, context)
+        return
+    if "language" in lower or "bhasha" in lower or lower == "🌐 language":
+        await language_cmd(update, context)
         return
 
     # If user is in chat mode OR message looks like a normal conversation → AI
@@ -770,6 +804,198 @@ async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+# ==================== LANGUAGE / 369 / 21-DAY ====================
+
+async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db.ensure_user(user.id, user.username, user.first_name)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇮🇳 Hindi / Hinglish", callback_data="lang_hi")],
+        [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
+    ])
+    await update.message.reply_text(
+        "🌐 *Choose Language / भाषा चुनें*\n\nSelect your preferred language:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=keyboard
+    )
+
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = "en" if query.data == "lang_en" else "hi"
+    db.set_language(query.from_user.id, lang)
+    if lang == "en":
+        await query.edit_message_text("✅ Language set to *English*.\nAll responses will now be in English.", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await query.edit_message_text("✅ Language *Hindi/Hinglish* set ho gaya.\nAb saare replies Hinglish mein aayenge.", parse_mode=ParseMode.MARKDOWN)
+
+
+async def method369_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db.ensure_user(user.id, user.username, user.first_name)
+    lang = db.get_language(user.id)
+    intention = db.get_369_intention(user.id)
+
+    if context.args:
+        text = " ".join(context.args).strip()
+        db.set_369_intention(user.id, text)
+        if ai.is_ai_available():
+            guide = ai.generate_369_guidance(text, lang=lang)
+            if guide:
+                await update.message.reply_text(guide, parse_mode=ParseMode.MARKDOWN)
+                return
+        if lang == "en":
+            msg = f"""🔢 *369 Method Activated*
+
+Your intention:
+_{text}_
+
+Write it:
+• Morning → 3 times
+• Afternoon → 6 times
+• Night → 9 times
+
+Feel it as already true while writing (Neville + The Secret)."""
+        else:
+            msg = f"""🔢 *369 Method Activate*
+
+Aapka intention:
+_{text}_
+
+Likho:
+• Subah → 3 baar
+• Dopahar → 6 baar
+• Raat → 9 baar
+
+Likhte waqt feel karo ki yeh already true hai."""
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if intention:
+        if lang == "en":
+            msg = f"""🔢 *Your current 369 intention:*
+
+_{intention}_
+
+Write 3 times (morning), 6 (afternoon), 9 (night).
+To set a new one: `/369 I am already living my dream life`"""
+        else:
+            msg = f"""🔢 *Aapka current 369 intention:*
+
+_{intention}_
+
+Subah 3, dopahar 6, raat 9 baar likho.
+Naya set karne ke liye: `/369 Main already apna dream life jee raha hoon`"""
+    else:
+        if lang == "en":
+            msg = """🔢 *369 Manifestation Method*
+
+How to use:
+`/369 Your present-tense intention`
+
+Example:
+`/369 I am so grateful now that money flows to me easily`
+
+You will write it 3 times in the morning, 6 in the afternoon, 9 at night — with feeling."""
+        else:
+            msg = """🔢 *369 Manifestation Method*
+
+Kaise use karein:
+`/369 Aapka present-tense intention`
+
+Example:
+`/369 Main deeply grateful hoon kyunki paisa asani se mere paas aa raha hai`
+
+Subah 3, dopahar 6, raat 9 baar — feeling ke saath likho."""
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def challenge_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db.ensure_user(user.id, user.username, user.first_name)
+    lang = db.get_language(user.id)
+    ch = db.get_active_challenge(user.id)
+
+    if context.args and context.args[0].lower() in ("start", "shuru", "begin"):
+        db.start_challenge(user.id)
+        if lang == "en":
+            msg = """📅 *21-Day Manifestation Challenge Started!*
+
+Every day for 21 days:
+1. Morning affirmation + visualization
+2. Write your 369 intention (3-6-9)
+3. Evening gratitude (3 things)
+4. Sleep in the feeling of the wish fulfilled (Neville)
+
+Come back daily and mark progress with /challenge done
+
+Day 1 begins now. You are already becoming your future self."""
+        else:
+            msg = """📅 *21-Day Manifestation Challenge Shuru!*
+
+Har din 21 din tak:
+1. Subah affirmation + visualization
+2. 369 intention likho (3-6-9)
+3. Shaam ko gratitude (3 cheezein)
+4. Wish fulfilled ke feeling mein so jao (Neville)
+
+Roz /challenge done likh ke progress mark karo.
+
+Day 1 abhi shuru. Aap already apne future self ban rahe ho."""
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if context.args and context.args[0].lower() in ("done", "complete", "ho"):
+        if not ch:
+            await update.message.reply_text("Pehle /challenge start karo." if lang != "en" else "First start with /challenge start")
+            return
+        day = db.advance_challenge_day(user.id)
+        if day >= 21:
+            msg = "🎉 *21 Days Complete!* You did it. Your new identity is forming." if lang == "en" else "🎉 *21 Din Complete!* Ho gaya. Nayi identity form ho rahi hai."
+        else:
+            msg = f"✅ Day {day} done! Keep going." if lang == "en" else f"✅ Day {day} complete! Aage badhte raho."
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if ch:
+        day = ch["current_day"] or 1
+        if lang == "en":
+            msg = f"""📅 *21-Day Challenge*
+
+Current Day: *{day}/21*
+Status: Active
+
+Commands:
+• `/challenge done` — mark today complete
+• `/challenge start` — restart"""
+        else:
+            msg = f"""📅 *21-Day Challenge*
+
+Current Day: *{day}/21*
+Status: Active
+
+Commands:
+• `/challenge done` — aaj ka complete mark karo
+• `/challenge start` — dobara shuru"""
+    else:
+        if lang == "en":
+            msg = """📅 *21-Day Manifestation Challenge*
+
+A powerful consistency practice based on Neville, The Secret & habit science.
+
+Start: `/challenge start`"""
+        else:
+            msg = """📅 *21-Day Manifestation Challenge*
+
+Neville, The Secret aur habit science pe based powerful consistency practice.
+
+Shuru: `/challenge start`"""
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+
 # ==================== DAILY JOB ====================
 
 async def send_daily_messages(context: ContextTypes.DEFAULT_TYPE):
@@ -783,12 +1009,13 @@ async def send_daily_messages(context: ContextTypes.DEFAULT_TYPE):
             name = u["first_name"] or None
             streak = u["streak"] or 0
 
+            lang = db.get_language(user_id)
             message = None
             if ai.is_ai_available():
-                message = ai.generate_daily_ai_message(goals, streak, name)
+                message = ai.generate_daily_ai_message(goals, streak, name, lang=lang)
 
             if not message:
-                message = local_get_daily_message(goals, streak, name)
+                message = local_get_daily_message(goals, streak, name, lang=lang)
 
             await context.bot.send_message(
                 chat_id=user_id,
@@ -866,6 +1093,11 @@ def main():
     application.add_handler(CommandHandler("myid", myid_cmd))
     application.add_handler(CommandHandler("addpremium", addpremium_cmd))
     application.add_handler(CommandHandler("removepremium", removepremium_cmd))
+    application.add_handler(CommandHandler("language", language_cmd))
+    application.add_handler(CommandHandler("lang", language_cmd))
+    application.add_handler(CommandHandler("369", method369_cmd))
+    application.add_handler(CommandHandler("challenge", challenge_cmd))
+    application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
 
     application.add_handler(goal_conv)
     application.add_handler(gratitude_conv)
