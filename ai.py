@@ -21,7 +21,7 @@ CUSTOM_API_KEY = os.getenv("CUSTOM_API_KEY")
 CUSTOM_BASE_URL = os.getenv("CUSTOM_BASE_URL")
 
 DEFAULT_MODELS = {
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "llama-3.1-70b-versatile",
     "openai": "gpt-4o-mini",
     "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
     "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
